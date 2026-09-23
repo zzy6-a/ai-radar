@@ -72,6 +72,8 @@ main{max-width:680px;margin:0 auto;padding:10px 12px 20px}
 .pill.up{background:rgba(248,81,73,.15);color:var(--down)}
 .pill.down{background:rgba(63,185,80,.15);color:var(--up)}
 .pill.new{background:rgba(76,141,255,.16);color:var(--acc)}
+.pill.rank-up{background:rgba(63,185,80,.15);color:var(--up)}
+.pill.rank-down{background:rgba(248,81,73,.13);color:var(--down)}
 .empty{text-align:center;color:var(--fg3);font-size:13px;padding:40px 0}
 .skel{height:66px;border-radius:var(--r);margin-bottom:8px;
   background:linear-gradient(90deg,var(--bg2) 25%,var(--bg3) 37%,var(--bg2) 63%);
@@ -225,6 +227,11 @@ function priceM(v){                       // $/token → $/M 字符串
   if (n < 100)  return n.toFixed(2);
   return n.toFixed(0);
 }
+/* 注意：Number(null)===0 会让 isFinite(null) 返回 true，必须显式挡 null */
+function num(v){
+  return (v === null || v === undefined || v === '' || typeof v === 'boolean')
+    ? null : (isFinite(v) ? Number(v) : null);
+}
 function fmtCtx(n){
   if (!n) return '—';
   if (n >= 1e6) return (n/1e6).toFixed(n % 1e6 ? 2 : 0) + 'M';
@@ -232,9 +239,10 @@ function fmtCtx(n){
   return String(n);
 }
 function fmtNum(n){
-  if (n == null || !isFinite(n)) return '—';
-  if (n >= 1000) return (n/1000).toFixed(n >= 1e4 ? 0 : 1) + 'k';
-  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  const v = num(n);
+  if (v === null) return '—';
+  if (v >= 1000) return (v/1000).toFixed(v >= 1e4 ? 0 : 1) + 'k';
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
 }
 function vendorOf(id){ return String(id || '').split('/')[0]; }
 function shiftDate(s, n){
@@ -548,15 +556,14 @@ function sortMeta(key){
 function coverage(key){
   if (!MODELS) return 0;
   const g = sortMeta(key).get;
-  return MODELS.reduce((n, m) => n + (isFinite(g(m)) ? 1 : 0), 0);
+  return MODELS.reduce((n, m) => n + (num(g(m)) !== null ? 1 : 0), 0);
 }
 function compare(a, b, key, dir){
   const g = sortMeta(key).get;
-  const va = g(a), vb = g(b);
-  const na = !isFinite(va), nb = !isFinite(vb);
-  if (na && nb) return 0;
-  if (na) return 1;                     // 缺值永远沉底
-  if (nb) return -1;
+  const va = num(g(a)), vb = num(g(b));
+  if (va === null && vb === null) return 0;
+  if (va === null) return 1;                     // 缺值永远沉底
+  if (vb === null) return -1;
   return (va - vb) * dir;
 }
 
@@ -595,25 +602,29 @@ function renderModels(){
     </div>`;
 
   const rows = list.slice(0, SHOWN).map((m, i) => {
-    const arena = m.__arena && m.__arena[sortMeta(SORT).arena];
-    const arenaAll = ARENA_LBS.map(lb => m.__arena && m.__arena[lb.key] != null
-      ? `<span class="ar">Arena ${lb.label} ${m.__arena[lb.key]}</span>` : '').join('');
-    const badge = m.rank_new && m.rank ? '<span class="pill new">🆕</span>' : '';
-    const chg = m.rank_change != null && m.rank_change !== 0
-      ? `<span class="pill ${m.rank_change > 0 ? 'down' : 'up'}">${m.rank_change > 0 ? '▲' : '▼'}${Math.abs(m.rank_change)}</span>` : '';
-    const price = m.pricing && isFinite(m.pricing.blended)
-      ? `$${Number(m.pricing.blended).toFixed(m.pricing.blended < 0.1 ? 4 : 2)}/M` : '—';
-    const spd = isFinite(m.speed) ? Number(m.speed).toFixed(1) : '—';
-    const intel = isFinite(m.intelligence_score) ? m.intelligence_score : '—';
-    const vs = isFinite(m.value_score) ? Number(m.value_score).toFixed(1) : '—';
+    const arenaVal = sortMeta(SORT).arena ? num(m.__arena && m.__arena[sortMeta(SORT).arena]) : null;
+    const arenaAll = ARENA_LBS.map(lb => {
+      const v = num(m.__arena && m.__arena[lb.key]);
+      return v !== null ? `<span class="ar">Arena ${lb.label} ${v}</span>` : '';
+    }).join('');
+    const badge = m.rank_new === true ? '<span class="pill new">🆕</span>' : '';
+    const rc = num(m.rank_change);
+    /* rank_change 是名次差：正数=名次前进(升)，负数=名次后退(降) */
+    const chg = (rc !== null && rc !== 0)
+      ? `<span class="pill ${rc > 0 ? 'rank-up' : 'rank-down'}">${rc > 0 ? '▲' : '▼'}${Math.abs(rc)}</span>` : '';
+    const pv = m.pricing ? num(m.pricing.blended) : null;
+    const price = pv !== null ? `$${pv.toFixed(pv < 0.1 ? 4 : 2)}/M` : '—';
+    const spd = num(m.speed);   const spdS = spd !== null ? spd.toFixed(1) : '—';
+    const intel = num(m.intelligence_score); const intelS = intel !== null ? String(intel) : '—';
+    const vs = num(m.value_score);  const vsS = vs !== null ? vs.toFixed(1) : '—';
     return `
       <div class="mrow">
         <div class="mrank${i < 3 ? ' top' : ''}">${i + 1}</div>
         <div class="mbody">
           <div class="mname">${esc(m.name)}${badge}${chg}</div>
           <div class="mprov">${esc(m.provider_display || m.provider || '')}</div>
-          <div class="mstat"><b>${intel}</b> 智能 · <b>${spd}</b> t/s · ${fmtCtx(m.context_length)} 上下文</div>
-          <div class="mfoot"><span>${price}</span><span>价值分 ${vs}</span>${arena ? `<span class="ar">Arena ${arena}</span>` : arenaAll ? arenaAll : ''}</div>
+          <div class="mstat"><b>${intelS}</b> 智能 · <b>${spdS}</b> t/s · ${fmtCtx(m.context_length)} 上下文</div>
+          <div class="mfoot"><span>${price}</span><span>价值分 ${vsS}</span>${arenaVal !== null ? `<span class="ar">Arena ${arenaVal}</span>` : arenaAll}</div>
         </div>
       </div>`;
   }).join('');
