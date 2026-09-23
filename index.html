@@ -41,8 +41,9 @@ header{
 .hd h1{margin:0;font-size:17px;font-weight:650;letter-spacing:.3px}
 .hd .clock{margin-left:auto;font-size:12px;color:var(--fg3);font-variant-numeric:tabular-nums}
 .sum{margin-top:5px;font-size:12px;color:var(--fg2);display:flex;flex-wrap:wrap;gap:0 10px;align-items:center;min-height:17px}
-.sum .dot{color:var(--fg3)}
-.sum .err{color:var(--warn)}
+.sum .src{color:var(--fg3);white-space:nowrap}
+.sum .src::before{content:'·';margin-right:10px;color:var(--fg3)}
+.sum .src.err{color:var(--warn)}
 .refresh{position:absolute;right:14px;top:calc(9px + env(safe-area-inset-top));
   font-size:12.5px;color:var(--acc);padding:2px 0;white-space:nowrap;line-height:1.4}
 .refresh:active{opacity:.6}
@@ -382,6 +383,11 @@ function highlightOf(md){
   const m = md.match(/###\s*\*\*今日亮点\*\*\s*\n+([\s\S]*?)\n+\s*---/);
   return m ? m[1].replace(/\s+/g,' ').trim() : '';
 }
+/* 日报头部声明的总条数，如「共 50 篇论文」「共 12 个产品」 */
+function totalOf(md, unit){
+  const m = md.match(new RegExp('共\\s*(\\d+)\\s*' + unit));
+  return m ? parseInt(m[1], 10) : null;
+}
 
 async function feedArxiv(){
   const { date, md } = await arDigest('ai-arxiv');
@@ -396,12 +402,13 @@ async function feedArxiv(){
     ts, url: r.url,
   }));
   const hl = highlightOf(md);
+  const total = totalOf(md, '篇论文');
   if (hl){
     items.unshift({
       type : 'digest',
       icon : '📌',
       tag  : '今日要点',
-      title: `ArXiv 研究日报 ${date}`,
+      title: `ArXiv 研究日报 ${date}${total ? ' · 共 ' + total + ' 篇' : ''}`,
       meta : hl,
       ts   : ts + 1000,
       url  : 'https://duanyytop.github.io/agents-radar/#date/' + date,
@@ -414,12 +421,14 @@ async function feedArxiv(){
 async function feedPH(){
   const { date, md } = await arDigest('ai-ph');
   const ts = new Date(date + 'T08:00:00Z').getTime();
-  return parseRows(md).slice(0, 6).map(r => ({
+  const total = totalOf(md, '个产品');
+  return parseRows(md).slice(0, 6).map((r, i) => ({
     type : 'ph',
     icon : '🚀',
     tag  : '产品',
     title: r.title,
-    meta : r.c1 ? `${r.c1} 票 · ${r.c2} 评论` : (r.c2 || '').slice(0, 110),
+    meta : (r.c1 ? `${r.c1} 票 · ${r.c2} 评论` : (r.c2 || '').slice(0, 110)) +
+           (i === 0 && total ? ` · 今日共 ${total} 个` : ''),
     ts, url: r.url,
   }));
 }
@@ -448,9 +457,9 @@ function renderFeed(){
   const order = ['新模型','价格','热帖','开源','产品','论文'];
   const parts = order.filter(k => counts[k]).map(k => `${k} ${counts[k]}`);
   const health = feedState.ok === feedState.total
-    ? `<span class="dot">·</span>${feedState.ok}/${feedState.total} 源正常`
-    : `<span class="dot">·</span><span class="err">${feedState.ok}/${feedState.total} 源正常</span>`;
-  sumEl.innerHTML = esc(parts.join(' · ')) + health;
+    ? `<span class="src">${feedState.ok}/${feedState.total} 源正常</span>`
+    : `<span class="src err">${feedState.ok}/${feedState.total} 源正常</span>`;
+  sumEl.innerHTML = `<span>${esc(parts.join(' · '))}</span>` + health;
   const rb = $('#btnRefresh');
   if (rb) rb.onclick = loadFeed;
 
