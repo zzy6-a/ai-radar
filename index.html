@@ -307,7 +307,7 @@ async function feedModels(){
   const list = (d.data || []).filter(m => m.created);
   const now = Date.now() / 1000;
   const fresh = list.filter(m => now - m.created < 21 * 86400);
-  return fresh.sort((a,b) => b.created - a.created).slice(0, 6).map(m => {
+  return fresh.sort((a,b) => b.created - a.created).slice(0, 5).map(m => {
     const pr = pricePair(m.pricing && m.pricing.prompt, m.pricing && m.pricing.completion);
     const bits = [vendorOf(m.id), fmtCtx(m.context_length) + ' 上下文'];
     if (pr) bits.push(pr);
@@ -385,7 +385,7 @@ async function feedGitHub(){
   const d = await fetchJSON(`${API.gh}?q=${encodeURIComponent(`created:>${since} stars:>300`)}` +
                             `&sort=stars&order=desc&per_page=20`);
   if (!d.items) throw new Error(d.message || 'gh rate limit');
-  return d.items.slice(0, 8).map(r => ({
+  return d.items.slice(0, 6).map(r => ({
     type : 'gh',
     icon : '⭐',
     tag  : '开源',
@@ -451,7 +451,7 @@ async function feedArxiv(){
     icon : '📄',
     tag  : '论文',
     title: r.title,
-    meta : [`${r.c1} 等`, firstSentence(r.c2, 60)].filter(Boolean).join(' · '),
+    meta : [`${r.c1} 等`, firstSentence(r.c2, 55)].filter(Boolean).join(' · '),
     ts, url: r.url,
   }));
   const hl = highlightOf(md);
@@ -460,8 +460,8 @@ async function feedArxiv(){
     items.unshift({
       type : 'digest',
       icon : '📌',
-      tag  : '今日要点',
-      title: `ArXiv 今日${total ? ' ' + total + ' 篇' : '论文'}`,
+      tag  : '论文',
+      title: `论文日报 · 今日 ${total || '若干'} 篇`,
       meta : firstSentence(hl, 120),
       ts   : ts + 1000,
       url  : 'https://duanyytop.github.io/agents-radar/#date/' + date,
@@ -475,7 +475,7 @@ async function feedPH(){
   const { date, md } = await arDigest('ai-ph');
   const ts = new Date(date + 'T08:00:00Z').getTime();
   const total = totalOf(md, '个产品');
-  return parseRows(md).slice(0, 5).map((r, i) => ({
+  return parseRows(md).slice(0, 3).map((r, i) => ({
     type : 'ph',
     icon : '🚀',
     tag  : '产品',
@@ -496,8 +496,17 @@ const FEED_SOURCES = [
 ];
 
 /* 每条最多占两行：标题一行 + 摘要一行 */
-let FEED_LIMIT = 26;
+let FEED_LIMIT = 24;
 let FEED_LIMIT_EXPANDED = false;
+
+/* 重要度权重：新模型与价格变动最值得看，产品/论文量大所以压后 */
+const FEED_WEIGHT = { '新模型': 100, '价格': 95, '热帖': 70, '开源': 60, '论文': 50, '产品': 40 };
+/* 单一来源在首屏最多占这么多条，超出的顺延 */
+const FEED_QUOTA = { '产品': 2, '论文': 3 };
+function weight(it){
+  const w = FEED_WEIGHT[it.tag] ?? 40;
+  return it.stale ? w - 30 : w;              // 缓存内容降权
+}
 let feedState = { items: [], ok: 0, total: FEED_SOURCES.length, at: 0, failed: [] };
 
 const FEED_TAGS = ['新模型','价格','热帖','开源','产品','论文'];
@@ -530,6 +539,20 @@ function renderFeed(){
 
   let list = feedState.items;
   if (FEED_FILTER !== 'all') list = list.filter(x => x.tag === FEED_FILTER);
+
+  /* 首屏内单一来源配额：超额条目移到后面，保证多样性 */
+  let head = list, tail = [];
+  if (FEED_FILTER === 'all'){
+    const used = {};
+    head = []; tail = [];
+    for (const it of list){
+      const cap = FEED_QUOTA[it.tag];
+      if (cap != null && (used[it.tag] || 0) >= cap){ tail.push(it); continue; }
+      used[it.tag] = (used[it.tag] || 0) + 1;
+      head.push(it);
+    }
+    if (FEED_LIMIT_EXPANDED) list = head.concat(tail);
+  }
   const shown = list.slice(0, FEED_LIMIT);
 
   const cards = shown.map(it => `
@@ -585,7 +608,8 @@ async function loadFeed(){
       }
     }
   }
-  items.sort((a,b) => (b.ts || 0) - (a.ts || 0));
+  /* 排序：重要度优先，同档内按时间。避免单一来源（如产品）挤满首屏 */
+  items.sort((a,b) => (weight(b) - weight(a)) || ((b.ts || 0) - (a.ts || 0)));
   feedState = { items, ok, total: FEED_SOURCES.length, at: Date.now(), failed };
   renderFeed();
   if (failed.length) console.warn('源失败（部分用缓存兜底）:', failed);
